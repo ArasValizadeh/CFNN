@@ -6,8 +6,8 @@ import numpy as np
 train_set = pd.read_csv('/Users/arasvalizadeh/Desktop/Training_Set.csv')
 test_set = pd.read_csv('/Users/arasvalizadeh/Desktop/Test_Set.csv')
 
-train_set = train_set.sample(n=2, random_state=42).reset_index(drop=True)
-test_set = test_set.sample(n=2, random_state=42).reset_index(drop=True)
+train_set = train_set.sample(n=350, random_state=42).reset_index(drop=True)
+test_set = test_set.sample(n=1000, random_state=42).reset_index(drop=True)
 
 X_train = train_set.iloc[:, 1:-1].values
 Y_train = train_set.iloc[:, -1].values
@@ -34,7 +34,6 @@ def fuzzy_neural_network(X, means, gammas, w):
             gaussian_membership(x, means[i], gammas[i]) for i in range(len(w))
         ])
         output = torch.dot(w, memberships)
-        print("output",output)
         outputs.append(output)
     return torch.stack(outputs)
 
@@ -42,13 +41,14 @@ def fuzzy_neural_network(X, means, gammas, w):
 def mean_squared_error(Y_pred, Y):
     return torch.mean((Y_pred - Y) ** 2)
 
-def lm_update(alpha, X, Y, means, gammas, w, lambd=0.01):
+def lm_update(alpha, X, Y, means, gammas, w, Lambda):
     Y_pred = fuzzy_neural_network(X, means, gammas, w)
     mse = mean_squared_error(Y_pred, Y)
     means.retain_grad()
     gammas.retain_grad()
     w.retain_grad()
     mse.backward()
+    e = Y - Y_pred
     with torch.no_grad():
         def model_fn(params):
             w_, means_, gammas_ = torch.split(params, [w.numel(), means.numel(), gammas.numel()])
@@ -65,11 +65,30 @@ def lm_update(alpha, X, Y, means, gammas, w, lambd=0.01):
         
         mse_grad = mse_grad.unsqueeze(1) 
         
-        update = torch.linalg.solve(H + lambd * torch.eye(H.shape[0]), mse_grad)  
+        update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), mse_grad)  
         
         alpha -= update.squeeze()
+        # J = torch.autograd.functional.jacobian(model_fn, alpha)
+        # J = J.reshape(-1, alpha.numel())
+        # H = J.T @ J  
+        # JTe = J.T @ e.unsqueeze(1) 
+        # update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), JTe)  
+        # alpha -= update.squeeze()
+    
+    w_, means_, gammas_ = torch.split(alpha, [w.numel(), means.numel(), gammas.numel()])
+    w_ = w_.reshape(w.shape)
+    means_ = means_.reshape(means.shape)
+    gammas_ = gammas_.reshape(gammas.shape)
 
-    return alpha
+    Y_pred_updated = fuzzy_neural_network(X, means_, gammas_, w_)
+    mse_updated = mean_squared_error(Y_pred_updated, Y)
+    
+    if mse_updated < mse:
+        Lambda /= 10  
+    elif mse_updated > mse:
+        Lambda *= 10  
+
+    return alpha , Lambda
 
 def initialize_parameters(R, n):
     means = torch.randn(R, n, requires_grad=True)
@@ -84,13 +103,17 @@ n = X_train.shape[1]  # Number of input dimensions
 means, gammas, w = initialize_parameters(R, n)
 alpha = torch.cat([w.flatten(), means.flatten(), gammas.flatten()])
 
-max_iterations = 1
+max_iterations = 5
+i = 1
+Lambda = 0.01
 for epoch in range(max_iterations):
-    alpha = lm_update(alpha, X_train, Y_train, means, gammas, w)
+    print(i)
+    i+=1
+    alpha , Lambda = lm_update(alpha, X_train, Y_train, means, gammas, w , Lambda)
 
-# torch.save({'means': means, 'gammas': gammas, 'w': w}, 'fuzzy_model.pth')
-# Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w)
-# test_mse = mean_squared_error(Y_pred_test, Y_test)
-# print("Test MSE:", test_mse.item())
-# print("Predicted outputs:", Y_pred_test)
-# print("Actual outputs:", Y_test)
+torch.save({'means': means, 'gammas': gammas, 'w': w}, 'fuzzy_model2.pth')
+Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w)
+test_mse = mean_squared_error(Y_pred_test, Y_test)
+print("Test MSE:", test_mse.item())
+print("Predicted outputs:", Y_pred_test)
+print("Actual outputs:", Y_test)
