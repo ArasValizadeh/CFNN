@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-saved_model = torch.load('fuzzy_model.pth')
+saved_model = torch.load('fuzzy_model2.pth')
 means = saved_model['means']
 gammas = saved_model['gammas']
 w = saved_model['w']
