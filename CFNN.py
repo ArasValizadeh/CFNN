@@ -11,8 +11,8 @@ full_data = pd.read_csv('/Users/arasvalizadeh/Desktop/Training_Set.csv')
 
 full_data_features = full_data.iloc[:,1:-1].values
 
-train_set = train_set.sample(n=400).reset_index(drop=True)
-test_set = test_set.sample(n=50).reset_index(drop=True)
+train_set = train_set.sample(n=550).reset_index(drop=True)
+test_set = test_set.sample(n=500).reset_index(drop=True)
 
 X_train = train_set.iloc[:, 1:-1].values
 Y_train = train_set.iloc[:, -1].values
@@ -27,16 +27,35 @@ Y_test = torch.tensor(Y_test, dtype=torch.float32)
 
 def gaussian_membership(x, mean, gamma):
     diff = x - mean
+    # print("gamma is :")
+    # print(gamma)
     try:
         L = torch.linalg.cholesky(gamma)
     except torch._C._LinAlgError:
-        print("Cholesky decomposition failed. Using pseudo-inverse instead.")
+        #print("Cholesky decomposition failed. Using pseudo-inverse instead.")
         L = torch.linalg.pinv(gamma)  # Use pseudo-inverse as a fallback
     transformed_x = torch.matmul(L, x)
     transformed_mean = torch.matmul(L, mean)
     diff = transformed_x - transformed_mean
     exponent = -torch.matmul(diff, diff)
     return torch.exp(exponent)
+
+# def gaussian_membership2(x, mean, gamma):
+#     diff = x - mean
+#     try:
+#         # Compute the SVD of gamma
+#         U, S, Vt = torch.linalg.svd(gamma, full_matrices=False)
+#         S_inv = torch.diag_embed(1.0 / S)
+#         L = Vt.T @ S_inv @ U.T  # Use SVD to approximate the 'inverse' of gamma
+#     except Exception as e:
+#         print(f"SVD decomposition failed: {e}")
+#         L = torch.linalg.pinv(gamma)  # Use pseudo-inverse as a last fallback
+    
+#     transformed_x = torch.matmul(L, x)
+#     transformed_mean = torch.matmul(L, mean)
+#     diff = transformed_x - transformed_mean
+#     exponent = -torch.matmul(diff, diff)
+#     return torch.exp(exponent)
 
 def optimal_kmeans(X):
     max_clusters = 10
@@ -99,9 +118,10 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda):
             return fuzzy_neural_network(X, means_, gammas_, w_)
         J = torch.autograd.functional.jacobian(model_fn, alpha)
         J = J.reshape(-1, alpha.numel())
-        H = J.T @ J  
-        JTe = J.T @ mse.unsqueeze(1) 
-        update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), JTe)  
+        residuals = (Y_pred - Y).reshape(-1, 1)
+        JTe = J.T @ residuals
+        H = J.T @ J
+        update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), JTe)
         alpha -= update.squeeze()
     
     w_, means_, gammas_ = torch.split(alpha, [w.numel(), means.numel(), gammas.numel()])
@@ -117,7 +137,7 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda):
     elif mse_updated > mse:
         Lambda *= 10  
 
-    return alpha , Lambda
+    return alpha , Lambda , means_ , gammas_ , w_
 
 n_clusters = optimal_kmeans(full_data)
 print(n_clusters)
@@ -128,19 +148,26 @@ print(means)
 R = n_clusters
 n = X_train.shape[1]  # Number of input dimensions
 
-# alpha = torch.cat([w.flatten(), means.flatten(), gammas.flatten()])
-
-# max_iterations = 40
-# i = 1
-# Lambda = 0.1
-# for epoch in range(max_iterations):
-#     print(i)
-#     i+=1
-#     alpha , Lambda = lm_update(alpha, X_train, Y_train, means, gammas, w , Lambda)
-
-# torch.save({'means': means, 'gammas': gammas, 'w': w}, 'fuzzy_model5.pth')
-# Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w)
-# test_mse = mean_squared_error(Y_pred_test, Y_test)
-# print("Test MSE:", test_mse.item())
-# print("Predicted outputs:", Y_pred_test)
-# print("Actual outputs:", Y_test)
+alpha = torch.cat([w.flatten(), means.flatten(), gammas.flatten()])
+print("before train")
+print(gammas)
+print(means)
+max_iterations = 10
+i = 1
+Lambda = 0.1
+for epoch in range(max_iterations):
+    print(i)
+    i+=1
+    alpha , Lambda , means , gammas , w = lm_update(alpha, X_train, Y_train, means, gammas, w , Lambda)
+    Y_pred_test = fuzzy_neural_network(X_train, means, gammas, w)
+    if mean_squared_error(Y_pred_test,Y_train) < 0.01:
+        break
+print("after train")
+print(gammas)
+print(means)
+torch.save({'means': means, 'gammas': gammas, 'w': w}, 'fuzzy_model12.pth')
+Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w)
+test_mse = mean_squared_error(Y_pred_test, Y_test)
+print("Test MSE:", test_mse.item())
+print("Predicted outputs:", Y_pred_test)
+print("Actual outputs:", Y_test)
