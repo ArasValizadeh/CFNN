@@ -9,8 +9,10 @@ test_set = pd.read_csv('/Users/arasvalizadeh/Desktop/Test_Set.csv')
 
 full_data = pd.read_csv('/Users/arasvalizadeh/Desktop/Training_Set.csv')
 
-train_set = train_set.sample(n=700, random_state=42).reset_index(drop=True)
-test_set = test_set.sample(n=50, random_state=42).reset_index(drop=True)
+full_data_features = full_data.iloc[:,1:-1].values
+
+train_set = train_set.sample(n=400).reset_index(drop=True)
+test_set = test_set.sample(n=50).reset_index(drop=True)
 
 X_train = train_set.iloc[:, 1:-1].values
 Y_train = train_set.iloc[:, -1].values
@@ -25,13 +27,19 @@ Y_test = torch.tensor(Y_test, dtype=torch.float32)
 
 def gaussian_membership(x, mean, gamma):
     diff = x - mean
-    L = torch.linalg.cholesky(gamma) 
-    y = torch.matmul(L, diff)
-    exponent = -torch.matmul(y, y)
+    try:
+        L = torch.linalg.cholesky(gamma)
+    except torch._C._LinAlgError:
+        print("Cholesky decomposition failed. Using pseudo-inverse instead.")
+        L = torch.linalg.pinv(gamma)  # Use pseudo-inverse as a fallback
+    transformed_x = torch.matmul(L, x)
+    transformed_mean = torch.matmul(L, mean)
+    diff = transformed_x - transformed_mean
+    exponent = -torch.matmul(diff, diff)
     return torch.exp(exponent)
 
 def optimal_kmeans(X):
-    max_clusters = 10  # Set a maximum number of clusters to evaluate
+    max_clusters = 10
     best_n_clusters = 1
     best_silhouette = -1
     for n_clusters in range(2, max_clusters + 1):
@@ -40,14 +48,20 @@ def optimal_kmeans(X):
         if silhouette_avg > best_silhouette:
             best_silhouette = silhouette_avg
             best_n_clusters = n_clusters
-    
     return  best_n_clusters
-
 
 def initialize_means_covariances(X, n_clusters):
     kmeans = KMeans(n_clusters=n_clusters, random_state=0).fit(X)
     means = torch.tensor(kmeans.cluster_centers_, dtype=torch.float32).requires_grad_()
-    covariances = torch.eye(X.shape[1]).repeat(n_clusters, 1, 1).requires_grad_()
+    covariances = []
+    for i in range(n_clusters):
+        cluster_points = X[kmeans.labels_ == i]
+        if cluster_points.shape[0] > 1:
+            cov_matrix = np.cov(cluster_points.T)  # Transpose because np.cov expects features as rows
+        else:
+            cov_matrix = np.eye(X.shape[1]) * 1e-6
+        covariances.append(torch.tensor(cov_matrix, dtype=torch.float32).requires_grad_())
+    covariances = torch.stack(covariances)
     return means, covariances
 
 def initialize_w(Y, n_clusters):
@@ -76,7 +90,6 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda):
     gammas.retain_grad()
     w.retain_grad()
     mse.backward()
-    e = Y - Y_pred
     with torch.no_grad():
         def model_fn(params):
             w_, means_, gammas_ = torch.split(params, [w.numel(), means.numel(), gammas.numel()])
@@ -84,26 +97,12 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda):
             means_ = means_.reshape(means.shape)
             gammas_ = gammas_.reshape(gammas.shape)
             return fuzzy_neural_network(X, means_, gammas_, w_)
-
         J = torch.autograd.functional.jacobian(model_fn, alpha)
         J = J.reshape(-1, alpha.numel())
         H = J.T @ J  
-
-        mse_grad = torch.cat([w.grad.flatten(), means.grad.flatten(), gammas.grad.flatten()])
-        
-        mse_grad = mse_grad.unsqueeze(1) 
-        
-        # update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), mse_grad)  
-        epsilon = 1e-4  # Small value to add to the diagonal
-        update = torch.linalg.solve(H + (Lambda + epsilon) * torch.eye(H.shape[0]), mse_grad)
-        
+        JTe = J.T @ mse.unsqueeze(1) 
+        update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), JTe)  
         alpha -= update.squeeze()
-        # J = torch.autograd.functional.jacobian(model_fn, alpha)
-        # J = J.reshape(-1, alpha.numel())
-        # H = J.T @ J  
-        # JTe = J.T @ e.unsqueeze(1) 
-        # update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), JTe)  
-        # alpha -= update.squeeze()
     
     w_, means_, gammas_ = torch.split(alpha, [w.numel(), means.numel(), gammas.numel()])
     w_ = w_.reshape(w.shape)
@@ -122,29 +121,24 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda):
 
 n_clusters = optimal_kmeans(full_data)
 print(n_clusters)
-print("...........")
 w = initialize_w(Y_train, n_clusters)
-means , gammas = initialize_means_covariances(X_train , n_clusters)
-print(w)
-print("...........")
+means , gammas = initialize_means_covariances(full_data_features , n_clusters)
+print(gammas)
 print(means)
-print("...........")
-print(gam)
-print("...........")
 R = n_clusters
 n = X_train.shape[1]  # Number of input dimensions
 
-alpha = torch.cat([w.flatten(), means.flatten(), gammas.flatten()])
+# alpha = torch.cat([w.flatten(), means.flatten(), gammas.flatten()])
 
-# max_iterations = 8
+# max_iterations = 40
 # i = 1
-# Lambda = 0.01
+# Lambda = 0.1
 # for epoch in range(max_iterations):
 #     print(i)
 #     i+=1
 #     alpha , Lambda = lm_update(alpha, X_train, Y_train, means, gammas, w , Lambda)
 
-# torch.save({'means': means, 'gammas': gammas, 'w': w}, 'fuzzy_model2.pth')
+# torch.save({'means': means, 'gammas': gammas, 'w': w}, 'fuzzy_model5.pth')
 # Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w)
 # test_mse = mean_squared_error(Y_pred_test, Y_test)
 # print("Test MSE:", test_mse.item())
