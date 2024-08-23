@@ -11,8 +11,8 @@ full_data = pd.read_csv('/Users/arasvalizadeh/Desktop/Training_Set.csv')
 
 full_data_features = full_data.iloc[:,1:-1].values
 
-train_set = train_set.sample(n=6000).reset_index(drop=True)
-test_set = test_set.sample(n=1000).reset_index(drop=True)
+train_set = train_set.sample(n=10).reset_index(drop=True)
+test_set = test_set.sample(n=1).reset_index(drop=True)
 
 X_train = train_set.iloc[:, 1:-1].values
 Y_train = train_set.iloc[:, -1].values
@@ -76,7 +76,8 @@ def fuzzy_neural_network(X, means, gammas, w ,L):
         memberships = torch.stack([
             gaussian_membership(x, means[i], gammas[i] , L[i]) for i in range(len(w))
         ])
-        output = torch.dot(w, memberships)
+        terms = w * memberships
+        output = torch.min(terms)
         outputs.append(output)
     return torch.stack(outputs)
 
@@ -115,14 +116,15 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda , L):
     return alpha, Lambda , w_
 
 n_clusters = optimal_kmeans(full_data_features)
-# print(n_clusters)
-# w = initialize_w(Y_train, n_clusters)
+print(n_clusters)
+w = initialize_w(Y_train, n_clusters)
+print(w)
 means , gammas , L = initialize_means_covariances(full_data_features , n_clusters)
 # print(gammas)
 # print(means)
 # print(L)
 alpha = torch.cat([w.flatten()])
-max_iterations = 10
+max_iterations = 1
 i = 1
 Lambda = 100
 for epoch in range(max_iterations):
@@ -134,9 +136,9 @@ for epoch in range(max_iterations):
     Y_pred_test = fuzzy_neural_network(X_train, means, gammas, w ,L)
     if mean_squared_error(Y_pred_test,Y_train) < 0.01:
         break
-torch.save({'means': means, 'gammas': gammas,'L':L ,'w': w}, 'fuzzy_model12.pth')
-Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w , L)
-test_mse = mean_squared_error(Y_pred_test, Y_test)
-print("Test MSE:", test_mse.item())
-print("Predicted outputs:", Y_pred_test)
-print("Actual outputs:", Y_test)
+# torch.save({'means': means, 'gammas': gammas,'L':L ,'w': w}, 'fuzzy_model12.pth')
+# Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w , L)
+# test_mse = mean_squared_error(Y_pred_test, Y_test)
+# print("Test MSE:", test_mse.item())
+# print("Predicted outputs:", Y_pred_test)
+# print("Actual outputs:", Y_test)
