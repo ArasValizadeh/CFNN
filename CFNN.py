@@ -88,7 +88,7 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda , L):
     Y_pred = fuzzy_neural_network(X, means, gammas, w, L)
     residuals = Y_pred - Y
     mse = mean_squared_error(Y_pred, Y)
-    print("mse is",mse)
+    # print("mse is",mse)
     # print("residuals",residuals)
     def error_fn(w_):
         Y_pred_ = fuzzy_neural_network(X, means, gammas, w_, L)
@@ -101,7 +101,7 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda , L):
     H = J.T @ J
     update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), JTe)
     print("update",update)
-    alpha -= update.squeeze()
+    alpha += update.squeeze()
     
     w_, = torch.split(alpha, [w.numel()])
     Y_pred_updated = fuzzy_neural_network(X, means, gammas, w_, L)
@@ -114,13 +114,13 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda , L):
 
     return alpha, Lambda , w_
 
-n_clusters = optimal_kmeans(full_data)
-print(n_clusters)
-w = initialize_w(Y_train, n_clusters)
+n_clusters = optimal_kmeans(full_data_features)
+# print(n_clusters)
+# w = initialize_w(Y_train, n_clusters)
 means , gammas , L = initialize_means_covariances(full_data_features , n_clusters)
-print(gammas)
-print(means)
-print(L)
+# print(gammas)
+# print(means)
+# print(L)
 alpha = torch.cat([w.flatten()])
 max_iterations = 10
 i = 1
