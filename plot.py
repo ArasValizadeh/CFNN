@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-saved_model = torch.load('fuzzy_model12.pth')
+saved_model = torch.load('fuzzy_model22.pth')
 means = saved_model['means']
 gammas = saved_model['gammas']
 w = saved_model['w']
@@ -28,8 +28,8 @@ def fuzzy_neural_network(X, means, gammas, w ,L):
     return torch.stack(outputs)
 
 
-x1_values = np.linspace(-20, 20, 500)
-x2_values = np.linspace(-20, 20, 500)
+x1_values = np.linspace(-10, 10, 500)
+x2_values = np.linspace(-10, 10, 500)
 x1_grid, x2_grid = np.meshgrid(x1_values, x2_values)
 X_plot = np.c_[x1_grid.ravel(), x2_grid.ravel()]
 X_plot_tensor = torch.tensor(X_plot, dtype=torch.float32)

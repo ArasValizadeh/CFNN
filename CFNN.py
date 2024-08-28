@@ -11,8 +11,8 @@ full_data = pd.read_csv('/Users/arasvalizadeh/Desktop/Training_Set.csv')
 
 full_data_features = full_data.iloc[:,1:-1].values
 
-train_set = train_set.sample(n=10).reset_index(drop=True)
-test_set = test_set.sample(n=1).reset_index(drop=True)
+train_set = train_set.sample(n=2000).reset_index(drop=True)
+test_set = test_set.sample(n=1000).reset_index(drop=True)
 
 X_train = train_set.iloc[:, 1:-1].values
 Y_train = train_set.iloc[:, -1].values
@@ -26,7 +26,6 @@ X_test = torch.tensor(X_test, dtype=torch.float32)
 Y_test = torch.tensor(Y_test, dtype=torch.float32)
 
 def gaussian_membership(x, mean, gamma , L):
-    diff = x - mean
     transformed_x = torch.matmul(L, x)
     transformed_mean = torch.matmul(L, mean)
     diff = transformed_x - transformed_mean
@@ -53,13 +52,13 @@ def initialize_means_covariances(X, n_clusters):
     for i in range(n_clusters):
         cluster_points = X[kmeans.labels_ == i]
         if cluster_points.shape[0] > 1:
-            cov_matrix = np.cov(cluster_points.T)  # Transpose because np.cov expects features as rows
-            l = torch.linalg.cholesky(torch.tensor(cov_matrix,dtype=torch.float32)) 
+            cov_matrix = torch.linalg.inv(torch.tensor(np.cov(cluster_points.T) , dtype=torch.float32))
+            # paiin ghotr bayad avaz beshe zate paiin mosalasi
+            l = torch.linalg.cholesky(cov_matrix.clone().detach().float())  
         else:
             cov_matrix = np.eye(X.shape[1]) * 1e-6
             l = np.eye(cov_matrix.shape[0])
-        covariances.append(torch.tensor(cov_matrix, dtype=torch.float32))
-        #covariances.append(cov_matrix.clone().detech().float())
+        covariances.append(cov_matrix.clone().detach().float()) 
         L.append(l.clone().detach().float())
     covariances = torch.stack(covariances)
     L = torch.stack(L)
@@ -67,6 +66,8 @@ def initialize_means_covariances(X, n_clusters):
 
 def initialize_w(Y, n_clusters):
     min_y, max_y = Y.min(), Y.max()
+    print("min and max:")
+    print(min_y, max_y)
     w = (torch.rand(n_clusters) * (max_y - min_y) + min_y).requires_grad_()
     return w
 
@@ -76,8 +77,10 @@ def fuzzy_neural_network(X, means, gammas, w ,L):
         memberships = torch.stack([
             gaussian_membership(x, means[i], gammas[i] , L[i]) for i in range(len(w))
         ])
-        terms = w * memberships
-        output = torch.min(terms)
+        # dot beshe
+        # terms = w * memberships
+        # output = torch.min(terms)
+        output = torch.dot(w,memberships)
         outputs.append(output)
     return torch.stack(outputs)
 
@@ -89,20 +92,19 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda , L):
     Y_pred = fuzzy_neural_network(X, means, gammas, w, L)
     residuals = Y_pred - Y
     mse = mean_squared_error(Y_pred, Y)
-    # print("mse is",mse)
-    # print("residuals",residuals)
     def error_fn(w_):
         Y_pred_ = fuzzy_neural_network(X, means, gammas, w_, L)
         return Y_pred_ - Y
     J = torch.autograd.functional.jacobian(error_fn, w)
-    # print("J is",J)
     J = J.reshape(-1, alpha.numel())  
     residuals = residuals.reshape(-1, 1)  
     JTe = J.T @ residuals
     H = J.T @ J
     update = torch.linalg.solve(H + Lambda * torch.eye(H.shape[0]), JTe)
+    print("alpha",alpha)
     print("update",update)
-    alpha += update.squeeze()
+    alpha -= update.squeeze()
+    print("updated aplha",alpha)
     
     w_, = torch.split(alpha, [w.numel()])
     Y_pred_updated = fuzzy_neural_network(X, means, gammas, w_, L)
@@ -115,30 +117,26 @@ def lm_update(alpha, X, Y, means, gammas, w, Lambda , L):
 
     return alpha, Lambda , w_
 
-n_clusters = optimal_kmeans(full_data_features)
-print(n_clusters)
+n_clusters = optimal_kmeans(full_data)
+print("n_clusters:",n_clusters)
 w = initialize_w(Y_train, n_clusters)
-print(w)
 means , gammas , L = initialize_means_covariances(full_data_features , n_clusters)
-# print(gammas)
-# print(means)
-# print(L)
 alpha = torch.cat([w.flatten()])
-max_iterations = 1
+max_iterations = 50
 i = 1
-Lambda = 100
+Lambda = 1
+# 1 ya 100 ro ba if inke inverse dare check kone
 for epoch in range(max_iterations):
     print(i)
     i+=1
-    print("w in this process:")
-    print(w)
     alpha , Lambda , w = lm_update(alpha, X_train, Y_train, means, gammas, w , Lambda , L)
     Y_pred_test = fuzzy_neural_network(X_train, means, gammas, w ,L)
+    print("mse",mean_squared_error(Y_pred_test,Y_train))
     if mean_squared_error(Y_pred_test,Y_train) < 0.01:
         break
-# torch.save({'means': means, 'gammas': gammas,'L':L ,'w': w}, 'fuzzy_model12.pth')
-# Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w , L)
-# test_mse = mean_squared_error(Y_pred_test, Y_test)
-# print("Test MSE:", test_mse.item())
-# print("Predicted outputs:", Y_pred_test)
-# print("Actual outputs:", Y_test)
+torch.save({'means': means, 'gammas': gammas,'L':L ,'w': w}, 'fuzzy_model22.pth')
+Y_pred_test = fuzzy_neural_network(X_test, means, gammas, w , L)
+test_mse = mean_squared_error(Y_pred_test, Y_test)
+print("Test MSE:", test_mse.item())
+print("Predicted outputs:", Y_pred_test)
+print("Actual outputs:", Y_test)
